@@ -31,6 +31,48 @@
 
 ---
 
+## 😱 흔한 오해 또는 설정 실수
+
+```java
+// ❌ 오해: java -jar app.jar 실행 시 Start-Class의 main()이 바로 호출된다
+// → 실제로는 JarLauncher.main() → ClassLoader 준비 → Start-Class.main() 순서
+// → Start-Class를 Main-Class로 직접 지정하면 ClassNotFoundException 발생
+
+// ❌ 오해: Fat JAR는 Shade JAR와 동일하다
+// Shade JAR: 모든 클래스를 하나의 패키지 공간에 병합
+//   → 동일 경로 리소스(META-INF/spring.factories 등) 충돌
+//   → JAR 서명(Signature) 깨짐
+// Fat JAR: 의존성 JAR를 원본 형태로 BOOT-INF/lib/에 중첩
+//   → 충돌 없음, 서명 보존
+
+// ❌ 실수: 멀티 모듈에서 라이브러리 모듈에 bootJar 적용
+// → BOOT-INF/classes/ 안에 클래스가 숨겨짐
+// → implementation(project(":core")) 시 클래스 못 찾음
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```
+java -jar app.jar 실행 순서:
+  JVM → MANIFEST.MF → Main-Class: JarLauncher
+  JarLauncher → jar:nested: URL 핸들러 등록
+  JarLauncher → LaunchedURLClassLoader 생성
+  LaunchedURLClassLoader → Start-Class 로딩
+  Start-Class.main() → SpringApplication.run()
+
+멀티 모듈 올바른 설정:
+  앱 모듈    : bootJar 활성화 (기본)
+  라이브러리 : bootJar 비활성화, jar 활성화
+
+// build.gradle.kts (라이브러리 모듈)
+tasks.named<BootJar>("bootJar") { enabled = false }
+tasks.named<Jar>("jar") { enabled = true }
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. Fat JAR 디렉토리 구조
@@ -226,6 +268,51 @@ if (cl instanceof URLClassLoader ucl) {
 }
 // jar:nested:/path/to/app.jar/!BOOT-INF/lib/spring-core-6.2.0.jar!/
 // jar:nested:/path/to/app.jar/!BOOT-INF/classes!/
+```
+
+---
+
+## ⚙️ 설정 최적화 팁
+
+```kotlin
+// build.gradle.kts
+tasks.named<BootJar>("bootJar") {
+    archiveFileName.set("app.jar")
+    mainClass.set("com.example.Application")
+
+    // Layered JAR 활성화 (Docker 최적화, 기본 활성화)
+    layered { enabled.set(true) }
+
+    // 빌드 정보 포함 (/actuator/info에 노출)
+    // springBoot { buildInfo() }
+    // → build.time, build.version, git.commit.id 포함
+}
+
+// PropertiesLauncher (외부 의존성 동적 주입이 필요한 경우)
+// MANIFEST.MF Main-Class를 PropertiesLauncher로 변경
+// java -Dloader.path=lib/ -jar app.jar
+// → 실행 시 외부 lib/ 폴더의 JAR도 classpath에 추가
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Fat JAR vs 의존성 외부화
+  Fat JAR:   단일 파일 배포, 이식성 높음, 파일 크기 수백 MB
+  외부 lib/: 컨테이너 레이어 분리 유리, 배포 구조 복잡
+  → Layered JAR로 Fat JAR 유지하면서 Docker 최적화 가능
+
+Shade JAR 대비
+  장점: 리소스 충돌 없음, JAR 서명 보존, 의존성 구조 추적 가능
+  단점: JVM이 중첩 JAR를 기본 지원하지 않아 커스텀 ClassLoader 필요
+        → 일부 프로파일러/에이전트와 호환성 이슈 가능
+
+LaunchedURLClassLoader
+  parent-first: 운영 안정성 (타입 일관성 보장)
+  → JVM 기본 위임 모델 준수
+  단, 커스텀 URL 핸들러 의존 → 일부 툴에서 JAR 분석 어려움
 ```
 
 ---

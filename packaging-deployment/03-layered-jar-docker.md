@@ -32,6 +32,49 @@ Layered JAR 해결:
 
 ---
 
+## 😱 흔한 오해 또는 설정 실수
+
+```dockerfile
+# ❌ 실수: 레이어 COPY 순서를 변경 빈도 무시하고 배치
+COPY --from=builder /application/application/ ./       # 자주 변함
+COPY --from=builder /application/dependencies/ ./      # 거의 안 변함
+# → application 변경 시 이후 dependencies 레이어 캐시도 무효화 → 의미 없음
+
+# ❌ 실수: Multi-stage 없이 단일 스테이지에서 추출
+FROM eclipse-temurin:21-jre
+COPY app.jar .
+RUN java -Djarmode=layertools -jar app.jar extract
+# → 원본 app.jar + 추출된 파일 둘 다 이미지에 포함 → 용량 두 배
+# → Multi-stage 빌드로 원본 JAR 제외해야 함
+
+# ❌ 오해: Layered JAR는 Spring Boot 3.x에서만 동작한다
+# → Spring Boot 2.4+부터 기본 활성화
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```dockerfile
+# 올바른 Multi-stage Layered JAR Dockerfile
+FROM eclipse-temurin:21-jre AS builder
+WORKDIR /application
+COPY app.jar .
+RUN java -Djarmode=layertools -jar app.jar extract
+# builder 스테이지의 원본 app.jar는 최종 이미지에 포함 안 됨
+
+FROM eclipse-temurin:21-jre
+WORKDIR /application
+# 변경 빈도 낮은 순서로 COPY (Docker 캐시 최대 활용)
+COPY --from=builder /application/dependencies/ ./
+COPY --from=builder /application/snapshot-dependencies/ ./
+COPY --from=builder /application/resources/ ./
+COPY --from=builder /application/application/ ./
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. layers.idx — 레이어 정의 파일
@@ -298,6 +341,27 @@ USER spring:spring
 # 4. Distroless 기본 이미지 (공격 표면 최소화)
 # FROM gcr.io/distroless/java21-debian12
 # → 셸, 패키지 관리자 없음 → 보안 강화
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Layered JAR vs 일반 Fat JAR Docker
+  Layered: 코드 변경 시 수 KB~수 MB만 재업로드, Dockerfile 복잡
+  일반:    설정 단순, 매 배포마다 수백 MB 재업로드
+  → CI/CD 빌드 횟수가 많을수록 Layered JAR 효과 극대화
+
+Multi-stage 빌드 복잡도
+  장점: 원본 JAR 최종 이미지에서 제거, 이미지 크기 최소화
+  단점: Dockerfile 두 스테이지 관리, CI 빌드 캐시 전략 필요
+  → 빌드 시간 최적화를 위해 buildCache 볼륨 설정 권장
+
+snapshot-dependencies 레이어 분리
+  장점: SNAPSHOT 갱신 시 release 의존성 캐시 유지
+  단점: 레이어 수 증가 → Docker 레이어 관리 복잡
+  → 사내 라이브러리가 많으면 company-dependencies 추가 레이어 고려
 ```
 
 ---

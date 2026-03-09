@@ -12,6 +12,81 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+Java EE 시대의 표준 배포 방식:
+  WAR → 외부 WAS(WebLogic, JBoss, Tomcat)에 배포
+  → 서버 한 대에 여러 앱 공존, WAS 라이선스 비용 분담
+
+Spring Boot의 변화:
+  임베디드 서버 내장 → Fat JAR 단일 파일로 배포
+  → 서버 설정도 코드로 관리, 컨테이너 친화적
+
+WarLauncher 존재 이유:
+  기존 WAS 인프라가 있는 조직의 마이그레이션 지원
+  하나의 WAR로 java -jar(임베디드)와 외부 컨테이너 배포 양쪽 지원
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```kotlin
+// ❌ 실수: 외부 Tomcat 배포 시 spring-boot-starter-tomcat을 implementation으로
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-tomcat")
+    // → WEB-INF/lib/에 포함 → 외부 Tomcat 클래스와 충돌
+    // → ClassCastException, NoSuchMethodError 발생
+}
+
+// ❌ 오해: WAR 배포 시 server.port 설정이 적용된다
+// server.port=9090 → 외부 Tomcat 배포 시 완전 무시
+// 포트는 Tomcat의 server.xml Connector 설정이 결정
+
+// ❌ 실수: SpringBootServletInitializer 없이 외부 컨테이너 배포
+// → Servlet 3.0 SPI로 진입점을 찾지 못해 앱이 초기화되지 않음
+// → 빈 응답 또는 404 반환
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```kotlin
+// 올바른 WAR 의존성 설정
+plugins { war }
+
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    // 내장 Tomcat → provided (WEB-INF/lib-provided/에 배치)
+    providedRuntime("org.springframework.boot:spring-boot-starter-tomcat")
+}
+
+// java -jar: lib-provided 포함 → 내장 Tomcat으로 실행
+// 외부 Tomcat: lib-provided 무시 → 외부 Tomcat 사용
+```
+
+```java
+// 올바른 Application 클래스 구성
+@SpringBootApplication
+public class Application extends SpringBootServletInitializer {
+
+    // 임베디드 실행용 (java -jar, IDE 실행)
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+
+    // 외부 컨테이너 배포용 진입점
+    @Override
+    protected SpringApplicationBuilder configure(SpringApplicationBuilder builder) {
+        return builder.sources(Application.class);
+    }
+}
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. JarLauncher vs WarLauncher 구조 비교
@@ -231,6 +306,49 @@ $CATALINA_HOME/bin/startup.sh
 # 로그 확인 (Spring 초기화 로그)
 tail -f $CATALINA_HOME/logs/catalina.out
 # "Initializing Spring embedded WebApplicationContext" → 정상
+```
+
+---
+
+## ⚙️ 설정 최적화 팁
+
+```kotlin
+// build.gradle.kts — WAR + 임베디드 동시 지원
+tasks.named<BootWar>("bootWar") {
+    archiveFileName.set("app.war")
+    // 외부 컨테이너 배포 시 Context Path는 WAR 파일명으로 결정
+    // ROOT.war → /, app.war → /app
+}
+
+// 임베디드 + WAR 둘 다 생성하려면
+tasks.named<BootJar>("bootJar") { enabled = true }
+tasks.named<BootWar>("bootWar") { enabled = true }
+```
+
+```yaml
+# WAR 배포 시 무시되는 설정들 (임베디드 전용)
+# server.port, server.ssl.*, server.tomcat.*
+# → 외부 컨테이너에서는 컨테이너 설정이 우선
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+임베디드 서버 (Fat JAR)
+  장점: 단일 파일 배포, 서버 설정 코드화, 컨테이너 친화적
+  단점: 앱마다 서버 인스턴스 분리 → 메모리 사용 증가
+  → 마이크로서비스, 신규 프로젝트 강력 권장
+
+외부 컨테이너 (WAR)
+  장점: WAS 라이선스 활용, 서버 한 대에 다중 앱, WAS 관리 조직 활용
+  단점: WAS 버전 종속, 서버 설정과 앱 코드 분리 관리, 배포 복잡
+  → 레거시 인프라 유지, 마이그레이션 과도기에만 선택
+
+현재 업계 트렌드:
+  컨테이너(Docker/K8s) 표준화 → Fat JAR 압도적 선호
+  WAR 배포는 레거시 운영 환경에서만 유지
 ```
 
 ---

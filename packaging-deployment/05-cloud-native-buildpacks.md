@@ -30,6 +30,52 @@ Cloud Native Buildpacks (CNB) 해결:
 
 ---
 
+## 😱 흔한 오해 또는 설정 실수
+
+```bash
+# ❌ 오해: Buildpack이 Dockerfile보다 항상 느리다
+# 첫 빌드: Builder 이미지 풀 + Buildpack 초기화 → 느림
+# 이후 빌드: buildCache/launchCache 볼륨 활용 → Dockerfile과 유사
+# → CI에서 캐시 볼륨 설정 없이 쓰면 매번 느림
+
+# ❌ 실수: 이미지명에 projectVersion 바인딩 문법 오류
+imageName.set("myapp:{projectVersion}")   # ❌ 중괄호
+imageName.set("myapp:${project.version}") # ✅ Gradle 문자열 보간
+
+# ❌ 오해: tiny 스택은 항상 안전하다
+# tiny: 셸, 패키지 매니저 없음
+# 앱에서 Runtime.exec(), ProcessBuilder로 외부 명령 실행 시 → 실패
+# ffmpeg, imagemagick 등 바이너리 의존 시 → 실패
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```kotlin
+// 올바른 Buildpack 빌드 설정
+tasks.named<BootBuildImage>("bootBuildImage") {
+    imageName.set("ghcr.io/myorg/myapp:${project.version}")
+    builder.set("paketobuildpacks/builder-noble-java-tiny:latest")
+
+    environment.set(mapOf(
+        "BP_JVM_VERSION" to "21",
+        "BPL_JVM_THREAD_COUNT" to "50",
+        "BPL_JVM_HEAD_ROOM" to "10"
+    ))
+
+    // CI/CD 필수: 캐시 볼륨 설정 (재빌드 시간 단축)
+    buildCache {
+        volume { name.set("cache-${rootProject.name}.build") }
+    }
+    launchCache {
+        volume { name.set("cache-${rootProject.name}.launch") }
+    }
+}
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. Buildpack 아키텍처
@@ -291,6 +337,29 @@ tasks.named<BootBuildImage>("bootBuildImage") {
         "ghcr.io/myorg/myapp:latest"
     ))
 }
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Buildpack vs Dockerfile
+  Buildpack:  표준화, 보안 패치 일괄 적용, Dockerfile 불필요
+              빌드 도구 의존, 첫 빌드 느림, 커스터마이징 제한
+  Dockerfile: 완전한 제어, 친숙한 문법, 빌드 툴 독립적
+              팀별 품질 편차, 보안 패치 각자 관리, 유지보수 부담
+
+보안 패치 워크플로우
+  Buildpack: Paketo 팀이 JRE 패치 → 재빌드만으로 일괄 적용
+             → 중앙화된 보안 관리 가능
+  Dockerfile: 각 팀이 FROM 이미지 업데이트 → 누락 발생 가능
+              → 취약한 이미지가 운영에 잔류할 위험
+
+tiny vs base 스택 선택
+  tiny: 공격 표면 최소, 셸 없음 → 보안 우수, exec 계열 불가
+  base: 일반 Linux 환경 → 유연, 이미지 크기 큼
+  → 기본 tiny 선택, 외부 바이너리 실행 필요 시 base로 전환
 ```
 
 ---

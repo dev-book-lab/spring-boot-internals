@@ -35,6 +35,58 @@ Native Image 특성:
 
 ---
 
+## 😱 흔한 오해 또는 설정 실수
+
+```java
+// ❌ 오해: Native Image는 JVM 앱보다 항상 빠르다
+// 기동 시간: Native가 압도적으로 빠름 (수십 ms vs 수 초)
+// 최대 처리량: JIT 최적화 없어 JVM보다 낮을 수 있음
+// → 장기 실행 고처리량 서비스에는 JVM이 유리할 수 있음
+
+// ❌ 오해: Spring Boot AOT가 모든 힌트를 자동 생성한다
+// 놓치는 경우:
+//   Class.forName("com.example." + dynamicName)  // 동적 문자열
+//   외부 라이브러리 내부 리플렉션 사용
+//   @ConditionalOnProperty로 AOT 시뮬레이션과 런타임 조건 불일치
+
+// ❌ 실수: native-image 빌드 메모리 부족
+// 기본 JVM 힙으로 빌드 시 OutOfMemoryError
+// → jvmArgs.add("-Xmx8g") 최소 8GB 권장
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```kotlin
+// 올바른 Native Image 빌드 설정
+plugins {
+    id("org.graalvm.buildtools.native") version "0.10.3"
+}
+
+graalvmNative {
+    binaries.named("main") {
+        imageName.set("app")
+        jvmArgs.add("-Xmx8g")           // 빌드 메모리 충분히 확보
+        buildArgs.add("--no-fallback")  // JVM 폴백 비활성화 (실패 시 명확히)
+        buildArgs.add("-H:+ReportExceptionStackTraces")
+    }
+    // 빌드 전 AOT 호환성 테스트
+    testSupport.set(true)
+}
+```
+
+```bash
+# 힌트 누락 감지 — native-image-agent로 런타임 수집
+java -agentlib:native-image-agent=config-output-dir=./hints \
+     -jar build/libs/app.jar
+# 앱 전체 기능 실행 후 Ctrl+C
+# → hints/reflect-config.json 생성
+# → src/main/resources/META-INF/native-image/에 복사
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. Closed World Assumption
@@ -329,6 +381,32 @@ graalvmNative {
         )
     }
 }
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Native Image vs JVM
+  기동 시간:   Native 압도적 우위 (수십 ms vs 수 초)
+  메모리:      Native 우위 (JVM 런타임 없음)
+  최대 처리량: JVM 우위 (JIT 프로파일 최적화)
+  빌드 시간:   JVM 압도적 우위 (수초 vs 수십 분)
+  동적 기능:   JVM 우위 (리플렉션, 동적 클래스 로딩 자유)
+
+적합한 환경
+  Native: 서버리스(AWS Lambda), 빠른 스케일아웃, 메모리 민감
+  JVM:    장기 실행 고처리량 서비스, 복잡한 리플렉션 의존 레거시
+
+Spring Boot AOT 엔진의 한계
+  Closed World 가정을 만족하기 위한 추가 작업 필요
+  외부 라이브러리 호환성 검증 필수 (GraalVM Reachability Metadata)
+  → 새 의존성 추가마다 Native 빌드 테스트 권장
+
+빌드 파이프라인 영향
+  수십 분 빌드 시간 → CI/CD 파이프라인 설계 변경 필요
+  별도 Native 빌드 스테이지 운영, 충분한 빌드 머신 사양 필요
 ```
 
 ---

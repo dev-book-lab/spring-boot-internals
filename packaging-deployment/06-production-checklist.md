@@ -12,6 +12,99 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+Spring Boot 기본값은 개발 편의를 위해 설계됨:
+  Actuator: 모든 엔드포인트 로컬 노출
+  로깅: INFO 레벨, 텍스트 포맷
+  JVM: 컨테이너 메모리 제한 미인식 (Java 11 이전)
+  Shutdown: 즉시 종료 (처리 중 요청 버림)
+
+운영 환경에서 이 기본값 그대로 사용하면:
+  Actuator /actuator/env → 환경변수·비밀키 외부 노출
+  텍스트 로그 → ELK/Splunk 수집 불가
+  -Xmx 미설정 → 컨테이너 OOM Kill
+  즉시 종료 → 처리 중 요청 504 오류
+
+→ 운영 배포 전 반드시 검토해야 할 설정 항목 정리
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```yaml
+# ❌ 실수: Actuator 전체 노출
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # env, beans, mappings, shutdown 전부 노출
+
+# ❌ 실수: shutdown 엔드포인트 활성화
+management:
+  endpoint:
+    shutdown:
+      enabled: true  # HTTP POST 한 번으로 서버 종료 가능
+
+# ❌ 실수: JVM 메모리 고정값 (컨테이너 환경 부적합)
+# java -Xmx512m -jar app.jar
+# → 컨테이너 메모리 제한이 256m이면 OOM Kill 발생
+
+# ❌ 실수: Graceful Shutdown 미설정
+# server.shutdown=immediate (기본값)
+# → K8s SIGTERM 수신 시 처리 중인 DB 트랜잭션도 즉시 끊김
+
+# ❌ 실수: health 상세 정보 무조건 노출
+management:
+  endpoint:
+    health:
+      show-details: always  # DB URL, 디스크 경로 등 내부 정보 노출
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```yaml
+# 운영 최소 권장 설정
+management:
+  server:
+    port: 8081              # 서비스 포트(8080)와 분리
+  endpoints:
+    web:
+      exposure:
+        include: "health,info,metrics,prometheus"
+  endpoint:
+    health:
+      show-details: when-authorized  # 인증된 요청만 상세 정보
+      probes:
+        enabled: true
+    shutdown:
+      enabled: false        # 절대 활성화 금지
+
+server:
+  shutdown: graceful        # 처리 중 요청 완료 대기
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  jpa:
+    open-in-view: false     # 반드시 비활성화 (커넥션 낭비)
+
+logging:
+  structured:
+    format:
+      console: ecs          # JSON 구조적 로그
+  level:
+    root: WARN
+    com.example: INFO
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. Actuator 보안 설정
@@ -446,6 +539,66 @@ curl http://localhost:8081/actuator/health/liveness
 # Readiness 상태 확인
 curl http://localhost:8081/actuator/health/readiness
 # {"status":"UP", "components": {...}}
+```
+
+---
+
+## ⚙️ 설정 최적화 팁
+
+```bash
+# 컨테이너 JVM 메모리 — 고정값 대신 비율로
+java \
+  -XX:MaxRAMPercentage=75.0 \       # 컨테이너 메모리의 75% → Heap Max
+  -XX:+ExitOnOutOfMemoryError \     # OOM 시 즉시 종료 (K8s가 재시작)
+  -XX:+HeapDumpOnOutOfMemoryError \ # OOM 원인 분석용
+  -XX:HeapDumpPath=/dumps/ \
+  -Xlog:gc*:file=/logs/gc.log:time,uptime:filecount=5,filesize=20m \
+  -jar app.jar
+```
+
+```yaml
+# HikariCP 운영 튜닝
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000    # 3초 초과 시 예외 (대기 금지)
+      idle-timeout: 600000        # 10분 유휴 시 반환
+      max-lifetime: 1800000       # 30분 최대 수명
+      keepalive-time: 30000       # 30초 keepalive (방화벽 세션 만료 방지)
+
+# K8s terminationGracePeriodSeconds > Spring timeout
+# terminationGracePeriodSeconds: 60  (K8s)
+# timeout-per-shutdown-phase: 30s    (Spring)
+# → Spring이 먼저 완전 종료 후 K8s가 프로세스 정리
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Actuator 포트 분리
+  장점: 서비스 포트와 완전 분리, 인그레스/LB 설정 단순
+  단점: K8s 서비스 설정 추가 필요, 모니터링 네트워크 별도 구성
+
+Graceful Shutdown 타임아웃
+  짧은 타임아웃(10s): 빠른 롤링 업데이트
+  긴 타임아웃(60s):   긴 트랜잭션/스트리밍 처리 안전
+  → 앱 특성에 맞게 설정, 기본 30s는 대부분 적합
+
+Liveness vs Readiness 범위
+  Liveness에 외부 의존성 포함 시:
+    DB 다운 → Liveness 실패 → 전체 Pod 재시작 루프 (CrashLoopBackOff)
+  Readiness에만 외부 의존성 포함 시:
+    DB 다운 → 트래픽 중단, 재시작 없음 → DB 복구 시 자동 회복
+  → 원칙: "재시작해도 해결 안 되는 문제"는 절대 Liveness 실패로 만들지 말 것
+
+구조적 로그(JSON)
+  장점: Elasticsearch/Splunk 수집·검색 용이, 필드별 필터링
+  단점: 로컬 개발 시 가독성 낮음
+  → 프로파일로 분리: 개발 텍스트, 운영 JSON
 ```
 
 ---
