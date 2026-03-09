@@ -12,6 +12,68 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+문제: 코드 변경 후 JVM 전체 재시작 = 5~30초 대기
+  JVM 초기화 + 라이브러리 클래스 로딩(Spring, Hibernate 등)
+  + Bean 생성 + ApplicationContext 초기화
+  → 작은 수정에도 긴 대기 → 개발 리듬 깨짐
+
+DevTools Restart의 접근:
+  라이브러리는 거의 변경되지 않는다
+  → 라이브러리 ClassLoader(Base)는 유지
+  → 앱 코드 ClassLoader(Restart)만 교체
+  → 라이브러리 재로딩 없음 → 1~3초로 단축
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```java
+// ❌ 오해: DevTools가 있으면 코드 저장 즉시 재시작된다
+// → Java 소스는 컴파일이 먼저 필요
+//   IntelliJ: 자동 빌드 비활성화 상태면 Cmd+F9 수동 빌드 필요
+//   (또는 Preferences → Build, Execution → Build project automatically 활성화)
+
+// ❌ 오해: @RestartScope를 사용하면 어떤 Bean이든 재시작 후 유지된다
+@RestartScope
+@Service
+public class UserService {
+    // ❌ UserService는 Restart ClassLoader의 클래스
+    // → Base ClassLoader에 남아있는 다른 Bean이 이것을 참조하면
+    //   재시작 후 ClassLoader 불일치 → ClassCastException
+}
+
+// ❌ 실수: 테스트 환경에서 DevTools가 예상치 못하게 재시작 유발
+// → src/test/resources 변경 시도 Restart 트리거 가능
+//   spring.devtools.restart.additional-exclude로 테스트 경로 제외
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```yaml
+# IntelliJ에서 최적 DevTools 설정
+spring:
+  devtools:
+    restart:
+      # 정적 리소스는 LiveReload만 → 불필요한 Restart 방지
+      exclude: "static/**,public/**,templates/**"
+      # IDE 빌드 완료 후에만 재시작 (중간 컴파일 상태 방지)
+      trigger-file: ".reloadtrigger"
+    livereload:
+      enabled: true
+
+# @RestartScope는 ClassLoader에 독립적인 리소스에만 적용
+# 올바른 예: LiveReloadServer (WebSocket 소켓만 유지, 앱 클래스 미참조)
+# 잘못된 예: 앱 서비스 클래스를 참조하는 Bean
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. 두 ClassLoader 구조
@@ -310,6 +372,46 @@ public ExpensiveResource expensiveResource() {
 // → 초기화 비용이 높은 리소스 (파일 핸들, 외부 연결 등)에 적용
 // ⚠️ 단, 앱 클래스를 참조하는 Bean에 @RestartScope를 쓰면
 //    재시작 후 ClassCastException 발생 가능 (ClassLoader 불일치)
+```
+
+---
+
+## ⚙️ 설정 최적화 팁
+
+```yaml
+spring:
+  devtools:
+    restart:
+      enabled: true
+      exclude: "static/**,public/**,templates/**,**/*.html"
+      poll-interval: 1s
+      quiet-period: 400ms
+      # 대규모 프로젝트: 빌드 완료 후 touch로 명시적 트리거
+      trigger-file: ".reloadtrigger"
+    livereload:
+      enabled: true
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+ClassLoader 교체 방식
+  장점: JVM 재시작 없음, 1~3초로 단축, 무료
+  단점: ApplicationContext 전체 재생성 (Bean, DataSource, 스레드 풀)
+        인메모리 세션/캐시 소멸
+        DB 커넥션 풀 재생성 비용
+
+JRebel 대비
+  DevTools: Bean 재생성 → Spring 컨텍스트 완전 초기화 보장
+            상태 불일치 가능성 낮음, 무료
+  JRebel:   Bean 유지 → 변경 전 상태가 그대로 남을 수 있음
+            더 빠르지만 유료, 상태 불일치 디버깅 어려울 수 있음
+
+대규모 앱에서 한계
+  Bean이 수백 개인 앱: ApplicationContext 초기화에 수 초
+  → Restart 이점이 줄어들어 JRebel/DCEVM과의 차이 감소
 ```
 
 ---

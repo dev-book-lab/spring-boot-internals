@@ -12,6 +12,56 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+전통적인 개발 사이클:
+  코드 수정 → 서버 재시작(수 초~수십 초) → 브라우저 새로고침(수동)
+
+LiveReload가 해결하는 문제:
+  브라우저 새로고침을 자동화
+  정적 리소스(HTML, CSS, JS) 변경 시 서버 재시작 없이 즉시 반영
+  → "저장하면 바로 브라우저에서 확인" 개발 경험 제공
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```java
+// ❌ 오해: LiveReload가 있으면 서버 재시작 없이 Java 코드 변경도 즉시 반영된다
+// → 실제로는 .class 파일 변경 시 Restart가 먼저 실행되고,
+//   Restart 완료 후 LiveReload 신호가 브라우저로 전송됨
+//   LiveReload 자체는 브라우저 새로고침만 담당
+
+// ❌ 오해: LiveReload 서버 포트(35729)를 임의로 바꿔도 된다
+// → 브라우저 확장 프로그램이 35729를 하드코딩으로 감지
+//   포트 변경 시 확장 프로그램이 연결 못 함
+
+// ❌ 실수: DevTools를 추가했는데 브라우저 자동 새로고침이 안 된다
+// → LiveReload 브라우저 확장 프로그램 설치 누락
+//   또는 spring.devtools.livereload.enabled=false 설정
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```
+LiveReload 동작 조건:
+  ① spring-boot-devtools 의존성 추가 (developmentOnly)
+  ② 브라우저에 LiveReload 확장 프로그램 설치
+     (Chrome: "LiveReload" 확장, 또는 페이지에 livereload.js 포함)
+  ③ 확장 프로그램 활성화 상태에서 앱 접속
+
+변경 종류별 동작:
+  .class 변경    → Restart → LiveReload (브라우저 새로고침)
+  .html/.css/.js → Restart 없이 LiveReload만 (빠름)
+  CSS만 변경     → liveCSS: 페이지 새로고침 없이 CSS만 교체
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. DevTools 전체 구성
@@ -351,6 +401,27 @@ spring:
       # 특정 파일에서 재시작 트리거 (기본값 무시하고 명시적 트리거)
       trigger-file: ".reloadtrigger"
       # → IDE가 이 파일을 touch하면 재시작 (다른 파일 무시)
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+LiveReload (브라우저 자동 새로고침)
+  장점: 정적 리소스 변경 시 즉각 확인, 개발 속도 향상
+  단점: 브라우저 확장 의존, 포트(35729) 고정, 외부 접근 불가
+        폼 입력 중 새로고침 → 작성 내용 날아감
+
+폴링 방식 파일 감지 (vs inotify/FSEvents)
+  장점: OS/파일시스템 독립적, 단순한 구현
+  단점: 최대 1.4초 지연(poll 1s + quiet 400ms)
+        파일 수가 많으면 CPU 사용량 증가
+
+@RestartScope
+  장점: 재시작 후 WebSocket 연결 유지 → 브라우저 재연결 불필요
+  단점: 앱 클래스 타입을 참조하면 ClassCastException 위험
+        잘못 사용하면 재시작 후 상태 불일치
 ```
 
 ---

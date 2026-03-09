@@ -29,6 +29,44 @@ Remote DevTools 구성:
 
 ---
 
+## 😱 흔한 오해 또는 설정 실수
+
+```yaml
+# ❌ 치명적 실수: 운영 환경 application.yml에 remote.secret 설정
+spring:
+  devtools:
+    remote:
+      secret: my-secret   # → RCE 취약점 오픈
+
+# ❌ 오해: HTTPS를 쓰면 Remote DevTools를 운영에서 써도 안전하다
+# → HTTPS는 전송 암호화만, 클래스 업로드(=코드 실행) 자체가 위험
+
+# ❌ 실수: secret을 application.yml에 하드코딩
+spring:
+  devtools:
+    remote:
+      secret: hardcoded-secret  # → Git에 노출
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```yaml
+# 스테이징 환경에서만, 환경변수로 secret 관리
+spring:
+  devtools:
+    remote:
+      secret: ${DEVTOOLS_SECRET}  # 환경변수에서만 주입
+      debug:
+        enabled: false  # 디버그 포트 불필요 시 비활성화
+
+# 사용 후 반드시 secret 설정 제거 또는 환경변수 해제
+# 사용 완료 → DEVTOOLS_SECRET 환경변수 삭제 → 재배포
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. 원격 서버 설정
@@ -244,6 +282,26 @@ spring:
         enabled: true  # 원격 재시작 활성화
       debug:
         enabled: false  # 원격 디버그는 필요 시에만 활성화
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Remote Update vs 재배포
+  Remote Update: 수 초만에 클래스 변경 반영, 재시작 포함
+  재배포:        CI/CD 파이프라인 통해 안전하게 반영
+  → Remote Update는 스테이징에서 임시 검증용, 정식 배포 대체 불가
+
+HTTP 터널 Debug vs 직접 JDWP 노출
+  HTTP 터널: JDWP 포트 방화벽 오픈 불필요, DevTools 의존
+  직접 JDWP: 더 안정적, 전용 VPN/SSH 터널과 조합 가능
+
+편의성 vs 보안
+  빠른 디버깅 사이클 vs RCE 취약점 수준의 위험
+  → 스테이징 환경, 짧은 사용 시간, 즉시 비활성화가 원칙
+  → 팀 전체가 위험성 인지 후 사용해야 함
 ```
 
 ---

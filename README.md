@@ -319,7 +319,7 @@ Ch7-06  Production-ready Checklist
 | 레포 | 주요 내용 | 필요 챕터 |
 |------|----------|-----------|
 | [spring-core-deep-dive](https://github.com/dev-book-lab/spring-core-deep-dive) | IoC 컨테이너, DI, AOP, Bean 생명주기 | `@Configuration`, `@Conditional` 이해 필수 |
-| [spring-data-transaction](https://github.com/dev-book-lab/spring-data-transaction) | JPA, 트랜잭션, 쿼리 최적화 | Chapter 4(JPA Auto-configuration) 학습 시 참고 |
+| [spring-data-transaction](https://github.com/dev-book-lab/spring-data-transaction) | JPA, 트랜잭션, 쿼리 최적화 | Chapter 2(JPA Auto-configuration) 학습 시 참고 |
 
 > 💡 Auto-configuration 챕터(Ch1~Ch2)만 목표라면 Spring Core 선행 없이도 독립적으로 학습 가능합니다.
 

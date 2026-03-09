@@ -12,6 +12,67 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+문제: 개발 환경마다 반복되는 설정 복사
+  # 개발 시작할 때마다 application-dev.yml에 추가
+  spring.thymeleaf.cache=false
+  spring.web.resources.cache.period=0
+  spring.h2.console.enabled=true
+  logging.level.web=DEBUG
+  → 팀원마다 다르게 설정, 누락 시 동작 차이 발생
+
+DevTools PropertyDefaults 해결:
+  개발 환경에서 흔히 필요한 설정을 자동 적용
+  → 아무 설정 없어도 개발에 최적화된 상태로 시작
+  → 운영 배포 시 자동 비활성화 (DevTools가 JAR에 미포함)
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```yaml
+# ❌ 오해: DevTools가 있으면 운영에서도 Thymeleaf 캐시가 꺼진다
+# → DevTools는 Gradle: developmentOnly, Maven: optional
+#   → bootJar 패키징 시 포함 안 됨 → 운영에선 기본값(cache=true) 적용
+
+# ❌ 실수: application-dev.yml에 DevTools 기본값과 동일한 설정을 중복 작성
+spring:
+  thymeleaf:
+    cache: false    # DevTools가 이미 false로 설정 → 중복
+
+# ❌ 오해: spring.devtools.add-properties=false 하면 재시작도 멈춘다
+# → PropertySource 추가만 비활성화, 재시작/LiveReload는 별개
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```yaml
+# DevTools 기본값에 의존 (application.yml에 명시 불필요)
+# 아무 설정 없어도 개발 시 자동 적용:
+#   - 템플릿 캐시 비활성화
+#   - 정적 리소스 HTTP 캐시 비활성화
+#   - H2 콘솔 활성화
+#   - web 로그 DEBUG
+
+# 기본값을 덮어쓰고 싶을 때만 명시
+spring:
+  devtools:
+    add-properties: true  # 기본값 (생략 가능)
+  h2:
+    console:
+      enabled: false  # H2 콘솔만 비활성화하고 싶을 때
+logging:
+  level:
+    web: INFO  # 요청 로그가 너무 많을 때만 낮춤
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. DevToolsPropertyDefaultsPostProcessor — 기본값 적용
@@ -282,6 +343,27 @@ spring:
     add-properties: false
   # → DevTools PropertySource 추가 안 함
   # → 재시작/LiveReload는 여전히 동작
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+자동 기본값 (편의성)
+  장점: 설정 없이 개발 최적화 상태, 팀 간 일관성
+  단점: 동작이 숨겨져 있어 파악하기 어려움
+        "왜 Thymeleaf 캐시가 꺼져 있지?" 혼란 가능
+
+명시적 설정 (가시성)
+  장점: application-dev.yml에 모든 설정이 보임, 의도 명확
+  단점: 팀원마다 다를 수 있음, 반복 작업
+
+H2 콘솔 자동 활성화
+  장점: 인메모리 DB 즉시 확인 편리
+  단점: H2 의존성이 없어도 설정이 활성화됨 (무해하지만 혼란)
+        보안 설정 없이 Spring Security와 함께 쓰면 접근 차단됨
+        → security.ignored 또는 h2-console 경로 예외 설정 필요
 ```
 
 ---

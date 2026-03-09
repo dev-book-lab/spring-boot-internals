@@ -12,6 +12,68 @@
 
 ---
 
+## 🔍 왜 이게 존재하는가
+
+```
+문제: java -jar만으로는 중첩 JAR 로딩 불가
+  표준 JVM은 JAR 안의 JAR를 직접 읽지 못함
+  → 의존성 수십~수백 개를 어떻게 단일 배포 파일에 담는가?
+
+Spring Boot Plugin이 해결하는 것:
+  bootJar: BOOT-INF/lib/에 의존성 중첩 + JarLauncher 내장
+  bootRun: Fat JAR 없이 ClassLoader 분리로 개발 실행
+  → 단일 JAR 배포 + DevTools Restart 완전 지원
+```
+
+---
+
+## 😱 흔한 오해 또는 설정 실수
+
+```kotlin
+// ❌ 실수: 라이브러리 모듈에 Spring Boot Plugin 적용
+// :core 모듈 build.gradle.kts
+plugins {
+    id("org.springframework.boot")  // ← 라이브러리에 적용 금지
+}
+// → bootJar로 Fat JAR 생성 → BOOT-INF/classes/ 안에 클래스 숨겨짐
+// → implementation(project(":core")) 시 클래스 못 찾음
+
+// ❌ 오해: bootRun과 java -jar build/libs/app.jar의 동작이 같다
+// bootRun: Base + Restart ClassLoader 분리, DevTools 완전 활성화
+// java -jar: LaunchedURLClassLoader 단일, DevTools Restart 분리 없음
+
+// ❌ 실수: developmentOnly 설정 안 하고 DevTools 추가
+dependencies {
+    implementation("org.springframework.boot:spring-boot-devtools")
+    // → bootJar에 포함됨 → 운영 JAR에 DevTools 노출
+}
+```
+
+---
+
+## ✨ 올바른 이해와 설정
+
+```kotlin
+// 올바른 DevTools 의존성 설정
+dependencies {
+    developmentOnly("org.springframework.boot:spring-boot-devtools")
+    // → bootJar 미포함, bootRun에서만 활성화
+}
+
+// 라이브러리 모듈에서 Spring Boot Plugin 없이 의존성만 사용
+plugins {
+    kotlin("jvm")
+    // Spring Boot Plugin 없음 → 일반 jar 태스크 동작
+}
+
+// 앱 모듈에서만 bootJar 활성화
+plugins {
+    id("org.springframework.boot")
+}
+```
+
+---
+
 ## 🔬 내부 동작 원리
 
 ### 1. Fat JAR(Uber JAR) 구조
@@ -389,6 +451,28 @@ tasks.named<BootJar>("bootJar") {
 // → JVM 없이 실행 가능한 네이티브 바이너리 생성
 // → 시작 시간 수십 ms, 메모리 사용량 극적 감소
 // → Chapter 7에서 상세 다룸
+```
+
+---
+
+## 🤔 트레이드오프
+
+```
+Fat JAR vs 의존성 외부화
+  Fat JAR: 단일 파일 배포, 간단, 수백 MB
+  외부 lib/: 컨테이너 레이어 최적화 용이, 배포 구조 복잡
+  → 컨테이너 환경: Layered JAR로 중간 지점 선택
+
+bootRun vs IDE Run
+  bootRun:  ClassLoader 분리 → DevTools 완전 지원, 빌드 도구 경유
+  IDE Run:  단일 ClassLoader, IDE가 직접 실행 → 더 빠른 시작
+  → DevTools Restart 동작 차이 주의
+  → IntelliJ에서 bootRun을 기본 실행 설정으로 지정 권장
+
+Layered JAR 복잡도
+  장점: Docker 빌드 시간 대폭 단축 (앱 레이어만 재빌드)
+  단점: Dockerfile이 복잡해짐, Multi-stage 빌드 필수
+  → CI/CD 환경에서 빌드 캐시 볼륨 설정 필요
 ```
 
 ---
