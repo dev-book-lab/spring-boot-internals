@@ -736,6 +736,6 @@ app.run(args);
 
 <div align="center">
 
-**[다음: @SpringBootApplication 3개 어노테이션 분해 ➡️](./02-springbootapplication-decompose.md)**
+**[홈으로 🏠](../README.md)** | **[다음: @SpringBootApplication 3개 어노테이션 분해 ➡️](./02-springbootapplication-decompose.md)**
 
 </div>
